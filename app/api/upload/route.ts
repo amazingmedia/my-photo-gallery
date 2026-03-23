@@ -3,13 +3,24 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; 
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Next.js ကို Build ချိန်တွင် ကြိုမဖတ်စေရန် (Error ကို တားဆီးရန်)
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    // ၁။ Login ဝင်ထားခြင်း ရှိမရှိ Token အရင်စစ်ဆေးပါမည် (လုံခြုံရေး အဆင့်)
+    // API ခေါ်မှသာ Supabase ကို ချိတ်ဆက်ပါမည် 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; 
+    
+    // Key မရှိပါက Error အတိအကျ ပြပေးရန်
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("Supabase Keys များ မရှိပါ။ Vercel တွင် စစ်ဆေးပါ။");
+      return NextResponse.json({ error: 'Server Configuration Error' }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // ၁။ Login ဝင်ထားခြင်း ရှိမရှိ Token စစ်ဆေးခြင်း
     const authHeader = request.headers.get('Authorization');
     if (!authHeader) {
       return NextResponse.json({ error: 'အကောင့်ဝင်ထားရန် လိုအပ်ပါသည်' }, { status: 401 });
