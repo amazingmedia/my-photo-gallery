@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase ချိတ်ဆက်ရန် (Frontend အတွက်)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -24,7 +23,6 @@ export default function Home() {
     setStatusText('Upload Ticket များ တောင်းခံနေပါသည်...');
 
     try {
-      // ၁။ API ဆီမှ Pre-signed URLs လှမ်းတောင်းခြင်း
       const fileInfo = selectedFiles.map(f => ({ name: f.name, type: f.type }));
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -34,7 +32,6 @@ export default function Home() {
       
       const { tickets } = await response.json();
 
-      // ၂။ Backblaze B2 ဆီသို့ ဖိုင်များကို တိုက်ရိုက် Upload တင်ခြင်း
       setStatusText('Backblaze B2 သို့ တိုက်ရိုက် တင်နေပါသည်...');
       const uploadedData = [];
 
@@ -48,8 +45,6 @@ export default function Home() {
           body: file,
         });
 
-        // Upload အောင်မြင်လျှင် Database တွင် မှတ်ရန် Data စုဆောင်းခြင်း
-        // မှတ်ချက်- Bucket အမည်ကို 'mmhdmovie' ဟု အသုံးပြုထားသည်
         const publicUrl = `https://f005.backblazeb2.com/file/mmhdmovie/${ticket.fileKey}`;
         uploadedData.push({
           photo_url: publicUrl,
@@ -58,14 +53,13 @@ export default function Home() {
         });
       }
 
-      // ၃။ Supabase Database ထဲသို့ လင့်ခ်များ မှတ်တမ်းတင်ခြင်း
       setStatusText('Database ထဲသို့ သိမ်းဆည်းနေပါသည်...');
       const { error } = await supabase.from('photos').insert(uploadedData);
 
       if (error) throw error;
 
       setStatusText('အောင်မြင်စွာ တင်ပြီးပါပြီ!');
-      setSelectedFiles([]); // ဖိုင်ရွေးထားသည်များကို ပြန်ရှင်းမည်
+      setSelectedFiles([]); 
       
     } catch (error) {
       console.error(error);
