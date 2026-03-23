@@ -28,8 +28,8 @@ export default function Home() {
   const [isLoadingGallery, setIsLoadingGallery] = useState(true);
   
   // iOS Lightbox အတွက် State များ
-  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null); // ဘယ်ပုံကိုနှိပ်ထားလဲ မှတ်ထားရန်
-  const [isDeleting, setIsDeleting] = useState(false); // ဖျက်နေစဉ် loading ပြရန်
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const router = useRouter();
 
@@ -128,40 +128,33 @@ export default function Home() {
     }
   };
 
-  // ************ iOS Gallery Logic (Lightbox & Delete) ************
-
-  // ပုံအကြီးချဲ့ကြည့်သည့်အခါ Next/Prev အတွက် Helper Function
   const navigatePhoto = useCallback((direction: 'next' | 'prev') => {
     if (selectedPhotoIndex === null) return;
     
     let nextIndex = direction === 'next' ? selectedPhotoIndex + 1 : selectedPhotoIndex - 1;
     
-    // ပထမဆုံးပုံရောက်ရင် Prev နှိပ်ရင် နောက်ဆုံးပုံသို့သွားမည်၊ နောက်ဆုံးပုံရောက်ရင် Next နှိပ်ရင် ပထမဆုံးပုံသို့သွားမည် (Loop)
     if (nextIndex >= photos.length) nextIndex = 0;
     if (nextIndex < 0) nextIndex = photos.length - 1;
     
     setSelectedPhotoIndex(nextIndex);
   }, [selectedPhotoIndex, photos.length]);
 
-  // Keyboard ဖြင့် Navigation လုပ်နိုင်အောင်ရေးခြင်း
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (selectedPhotoIndex === null) return;
       if (e.key === 'ArrowRight') navigatePhoto('next');
       if (e.key === 'ArrowLeft') navigatePhoto('prev');
-      if (e.key === 'Escape') setSelectedPhotoIndex(null); // Escape နှိပ်ရင် ပိတ်မည်
+      if (e.key === 'Escape') setSelectedPhotoIndex(null); 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedPhotoIndex, navigatePhoto]);
 
-  // ပုံဖျက်ခြင်း လုပ်ငန်းစဉ်
   const handleDeletePhoto = async () => {
     if (selectedPhotoIndex === null || !sessionToken || !confirm('ဒီပုံကို အပြီးဖျက်မှာ သေချာပါသလား?')) return;
     
     setIsDeleting(true);
     const photoToDelete = photos[selectedPhotoIndex];
-    // Database URL ကနေ File Key ကို ဖြတ်ယူခြင်း
     const fileKey = photoToDelete.photo_url.split('/').pop();
 
     try {
@@ -176,16 +169,14 @@ export default function Home() {
       
       if (!response.ok) throw new Error('Delete API failed');
 
-      // UI မှ တစ်ခါတည်း ချက်ချင်းဖျက်လိုက်ခြင်း
       const updatedPhotos = photos.filter(p => p.id !== photoToDelete.id);
       setPhotos(updatedPhotos);
       
-      // ပုံဖျက်ပြီးနောက် နောက်တစ်ပုံကို ပြရန် (သို့မဟုတ် နောက်ဆုံးပုံဆိုရင် Lightbox ပိတ်မည်)
       if (updatedPhotos.length === 0) {
         setSelectedPhotoIndex(null);
       } else {
-        // Next index သို့Loop ပတ်ပေးခြင်း
-        navigatePhoto('next');
+        // Next index သို့Loop ပတ်ပေးခြင်း (ဒီနေရာမှာ Error မတက်အောင် index ပြန်ချိန်ပါမည်)
+        setSelectedPhotoIndex(Math.min(selectedPhotoIndex, updatedPhotos.length - 1));
       }
 
     } catch (error) {
@@ -196,7 +187,6 @@ export default function Home() {
     }
   };
 
-  // Web Share API ဖြင့် ပုံကို Share ခြင်း (Phone မှာဆို iOS Share ပေါ်မည်)
   const handleShare = async () => {
     if (selectedPhotoIndex === null) return;
     const photo = photos[selectedPhotoIndex];
@@ -210,7 +200,6 @@ export default function Home() {
         console.log('Share error:', error);
       }
     } else {
-      // Browser က Share မရရင် Link ကို Copy ယူမည်
       navigator.clipboard.writeText(photo.view_url || photo.photo_url);
       alert('Link copied to clipboard!');
     }
@@ -221,7 +210,6 @@ export default function Home() {
   return (
     <main className="min-h-screen p-0 m-0 bg-white text-gray-900 font-sans">
       
-      {/* Dense iPhone Style Header */}
       <div className="bg-white/95 backdrop-blur-sm sticky top-0 z-40 border-b border-gray-100 p-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-2xl font-extrabold text-gray-950 tracking-tighter">My Photos</h1>
@@ -253,13 +241,12 @@ export default function Home() {
             <p className="text-gray-500">No photos yet. Start by uploading one.</p>
           </div>
         ) : (
-          /* dense iPhone Style Photo Grid */
           <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1 md:gap-2">
             {photos.map((photo, index) => (
               <div 
                 key={photo.id} 
                 className="group relative aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer"
-                onClick={() => setSelectedPhotoIndex(index)} // ပုံကိုနှိပ်ရင် index ကိုမှတ်မည်
+                onClick={() => setSelectedPhotoIndex(index)} 
               >
                 {photo.media_type?.includes('video') ? (
                   <div className="w-full h-full bg-gray-900 flex items-center justify-center">
@@ -270,10 +257,10 @@ export default function Home() {
                   <img 
                     src={photo.view_url || photo.photo_url} 
                     alt="Gallery item" 
-                    className="w-full h-full object-cover loading="lazy"
+                    className="w-full h-full object-cover" 
+                    loading="lazy"
                   />
                 )}
-                {/* Hover Effect */}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none"></div>
               </div>
             ))}
@@ -281,11 +268,9 @@ export default function Home() {
         )}
       </div>
 
-      {/* ************ iOS Style Lightbox (Full Screen View) Modal ************ */}
       {selectedPhotoIndex !== null && (
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col transition-all duration-300">
           
-          {/* Header - Close Button (iOS Style Done) */}
           <div className="flex items-center justify-between p-4 bg-black/20 text-white">
             <button onClick={() => setSelectedPhotoIndex(null)} className="flex items-center gap-1.5 text-blue-400 font-medium">
               <CloseIcon className="w-5 h-5" /> Done
@@ -293,9 +278,7 @@ export default function Home() {
             <p className="text-xs text-gray-400 font-mono">{selectedPhotoIndex + 1} / {photos.length}</p>
           </div>
 
-          {/* Main Content - Large Image Area */}
           <div className="flex-grow relative flex items-center justify-center p-2 group">
-            {/* Prev Button (desktop only) */}
             <button onClick={() => navigatePhoto('prev')} className="absolute left-4 z-10 p-3 bg-black/40 rounded-full text-white/50 group-hover:text-white group-hover:bg-black/80 hidden md:block transition-all">
               &larr;
             </button>
@@ -312,13 +295,11 @@ export default function Home() {
               )}
             </div>
 
-            {/* Next Button (desktop only) */}
             <button onClick={() => navigatePhoto('next')} className="absolute right-4 z-10 p-3 bg-black/40 rounded-full text-white/50 group-hover:text-white group-hover:bg-black/80 hidden md:block transition-all">
               &rarr;
             </button>
           </div>
 
-          {/* Footer - iOS Native Style Action Bar (Share, Heart, Trash) */}
           <div className="bg-black/40 backdrop-blur-sm p-4 border-t border-gray-800 flex items-center justify-around text-blue-400">
             <button onClick={handleShare} className="hover:text-blue-200" title="Share Photo">
               <ShareIcon className="w-7 h-7" />
