@@ -53,8 +53,13 @@ export default function Home() {
     setIsLoadingGallery(true);
     
     try {
-      const response = await fetch('/api/photos', {
-        headers: { 'Authorization': `Bearer ${sessionToken}` }
+      // ပြင်ဆင်ချက် - မှတ်ဉာဏ်ဟောင်း (Cache) လုံးဝမသုံးစေရန် t=... ဆိုသော timestamp ကို အတင်းထည့်ပေးခြင်း
+      const response = await fetch(`/api/photos?t=${new Date().getTime()}`, {
+        headers: { 
+          'Authorization': `Bearer ${sessionToken}`,
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store' // Cache ကို ပိတ်လိုက်ပါပြီ
       });
       
       if (!response.ok) throw new Error('Failed to fetch photos');
@@ -107,7 +112,6 @@ export default function Home() {
         const file = files[i];
         const ticket = tickets[i];
 
-        // ပြင်ဆင်ချက် - Upload ကျရှုံးပါက ဆက်မလုပ်ဘဲ Error အတိအကျ ပြပေးမည့်စနစ်
         const putResponse = await fetch(ticket.uploadUrl, { 
           method: 'PUT', 
           headers: { 'Content-Type': file.type || 'application/octet-stream' }, 
@@ -115,9 +119,7 @@ export default function Home() {
         });
 
         if (!putResponse.ok) {
-          const errorText = await putResponse.text();
-          console.error("Backblaze Error Details:", errorText);
-          throw new Error(`Upload Failed: ${putResponse.status}. Backblaze rejected the file.`);
+          throw new Error(`Upload Failed: ${putResponse.status}.`);
         }
 
         const publicUrl = `https://mmhdmovie.s3.us-east-005.backblazeb2.com/${ticket.fileKey}`;
@@ -129,15 +131,15 @@ export default function Home() {
       if (error) throw new Error('Database Insert Failed');
 
       setStatusText('အောင်မြင်စွာ တင်ပြီးပါပြီ! 🎉');
-      fetchPhotos(); 
+      
+      // ပုံသစ်တင်ပြီးပါက Gallery ကို ချက်ချင်း Refresh ပြန်လုပ်မည်
+      await fetchPhotos(); 
       
     } catch (error: any) {
       console.error("Upload Catch Error:", error);
-      // ပြင်ဆင်ချက် - Error တက်ပါက အနီရောင်စာသားဖြင့် အတိအကျ ဖော်ပြပေးမည်
       setStatusText(`❌ Error: ${error.message}`);
     } finally {
       setIsUploading(false);
-      // Error ဖြစ်ရင် စာသားကို ချက်ချင်းမဖျောက်ဘဲ အချိန်ပိုပေးထားမည်
       setTimeout(() => setStatusText(''), 6000); 
     }
   };
@@ -169,7 +171,6 @@ export default function Home() {
     
     setIsDeleting(true);
     const photoToDelete = photos[selectedPhotoIndex];
-    // လင့်ခ်အဆုံးပိုင်းရှိ ဖိုင်နာမည်ကို အတိအကျ ဖြတ်ယူခြင်း
     const fileKey = photoToDelete.photo_url.split('/').pop()?.split('?')[0];
 
     try {
@@ -184,14 +185,8 @@ export default function Home() {
       
       if (!response.ok) throw new Error('Delete API failed');
 
-      const updatedPhotos = photos.filter(p => p.id !== photoToDelete.id);
-      setPhotos(updatedPhotos);
-      
-      if (updatedPhotos.length === 0) {
-        setSelectedPhotoIndex(null);
-      } else {
-        setSelectedPhotoIndex(Math.min(selectedPhotoIndex, updatedPhotos.length - 1));
-      }
+      setSelectedPhotoIndex(null); // အရင်ဆုံး Lightbox ကို ပိတ်လိုက်မည်
+      await fetchPhotos(); // ပြီးမှ Database ကို အသစ်ပြန်ဆွဲထုတ်မည် (Cache ပိတ်ထားသဖြင့် သေချာပေါက် ပျောက်သွားပါမည်)
 
     } catch (error) {
       console.error(error);
@@ -242,7 +237,6 @@ export default function Home() {
             </button>
           </div>
         </div>
-        {/* Error ပေါ်လာပါက အနီရောင်ဖြင့် ပြသရန် ပြင်ဆင်ထားသည် */}
         {statusText && (
           <p className={`mt-3 text-sm text-center font-medium p-2 rounded-lg animate-pulse ${statusText.includes('Error') ? 'text-red-700 bg-red-50' : 'text-blue-700 bg-blue-50/50'}`}>
             {statusText}
@@ -279,6 +273,10 @@ export default function Home() {
                     alt="Gallery item" 
                     className="w-full h-full object-cover" 
                     loading="lazy"
+                    // ပြင်ဆင်ချက် - URL မှားယွင်းနေပါက ပုံကျိုးမပြဘဲ Placeholder ပြပေးမည်
+                    onError={(e) => {
+                      e.currentTarget.src = 'https://placehold.co/400x400/eeeeee/999999?text=Error';
+                    }}
                   />
                 )}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none"></div>
@@ -308,9 +306,12 @@ export default function Home() {
                 <video src={photos[selectedPhotoIndex].view_url} controls className="w-full max-h-[80vh] object-contain" autoPlay />
               ) : (
                 <img 
-                  src={photos[selectedPhotoIndex].view_url} 
+                  src={photos[selectedPhotoIndex].view_url || photos[selectedPhotoIndex].photo_url} 
                   alt="Full view" 
                   className="max-w-full max-h-[80vh] object-contain transition-transform duration-300"
+                  onError={(e) => {
+                    e.currentTarget.src = 'https://placehold.co/400x400/eeeeee/999999?text=Error';
+                  }}
                 />
               )}
             </div>
