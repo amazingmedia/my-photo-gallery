@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
-// အဆင့် ၂ က Icons Helper ကို Import လုပ်ခြင်း
 import { CloseIcon, DeleteIcon, ShareIcon, HeartIcon } from '@/components/GalleryIcons';
 
 const supabase = createClient(
@@ -19,7 +18,6 @@ type Photo = {
 };
 
 export default function Home() {
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [sessionToken, setSessionToken] = useState<string | null>(null);
@@ -27,7 +25,6 @@ export default function Home() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isLoadingGallery, setIsLoadingGallery] = useState(true);
   
-  // iOS Lightbox အတွက် State များ
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   
@@ -76,17 +73,24 @@ export default function Home() {
     router.push('/login');
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) setSelectedFiles(Array.from(e.target.files));
+  // ဖိုင်ရွေးလိုက်သည်နှင့် တစ်ပြိုင်နက် Auto Upload လုပ်မည့် Function
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const filesToUpload = Array.from(e.target.files);
+      await processUpload(filesToUpload);
+    }
+    // ဖိုင်ရွေးပြီးသွားပါက Input ကို ပြန်ရှင်းထားမည် (နောက်တစ်ခါ ထပ်ရွေးနိုင်ရန်)
+    e.target.value = '';
   };
 
-  const handleUpload = async () => {
-    if (selectedFiles.length === 0 || !sessionToken) return;
+  // Upload တင်သည့် အဓိက လုပ်ငန်းစဉ်
+  const processUpload = async (files: File[]) => {
+    if (!sessionToken) return;
     setIsUploading(true);
-    setStatusText('Uploading memory...');
+    setStatusText('ပုံများ စတင် Upload တင်နေပါသည်...');
 
     try {
-      const fileInfo = selectedFiles.map(f => ({ name: f.name, type: f.type }));
+      const fileInfo = files.map(f => ({ name: f.name, type: f.type }));
       
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -100,11 +104,10 @@ export default function Home() {
       if (!response.ok) throw new Error('API Check failure');
       
       const { tickets } = await response.json();
-
       const uploadedData = [];
 
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const ticket = tickets[i];
 
         await fetch(ticket.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
@@ -113,18 +116,19 @@ export default function Home() {
         uploadedData.push({ photo_url: publicUrl, account_id: ticket.accountId, media_type: ticket.mediaType });
       }
 
+      setStatusText('Database ထဲသို့ မှတ်တမ်းတင်နေပါသည်...');
       const { error } = await supabase.from('photos').insert(uploadedData);
       if (error) throw error;
 
-      setSelectedFiles([]); 
-      fetchPhotos(); 
+      setStatusText('အောင်မြင်စွာ တင်ပြီးပါပြီ! 🎉');
+      fetchPhotos(); // ပုံသစ်တင်ပြီးပါက Gallery ကို ချက်ချင်း Refresh လုပ်မည်
       
     } catch (error) {
       console.error(error);
       setStatusText('Upload Failed. Please try again.');
     } finally {
       setIsUploading(false);
-      setTimeout(() => setStatusText(''), 3000); 
+      setTimeout(() => setStatusText(''), 4000); 
     }
   };
 
@@ -175,7 +179,6 @@ export default function Home() {
       if (updatedPhotos.length === 0) {
         setSelectedPhotoIndex(null);
       } else {
-        // Next index သို့Loop ပတ်ပေးခြင်း (ဒီနေရာမှာ Error မတက်အောင် index ပြန်ချိန်ပါမည်)
         setSelectedPhotoIndex(Math.min(selectedPhotoIndex, updatedPhotos.length - 1));
       }
 
@@ -214,12 +217,14 @@ export default function Home() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-2xl font-extrabold text-gray-950 tracking-tighter">My Photos</h1>
           <div className="flex items-center gap-3">
+            {/* Auto-upload input */}
             <input 
               type="file" multiple accept="image/*, video/*" onChange={handleFileChange}
               id="fileInput"
               className="hidden"
+              disabled={isUploading}
             />
-            <label htmlFor="fileInput" className="bg-blue-50 text-blue-700 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer hover:bg-blue-100 transition-colors">
+            <label htmlFor="fileInput" className={`font-bold px-4 py-2 rounded-lg text-sm transition-colors ${isUploading ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-50 text-blue-700 cursor-pointer hover:bg-blue-100'}`}>
               {isUploading ? 'Uploading...' : 'Upload'}
             </label>
             <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-700 font-medium">
@@ -227,7 +232,8 @@ export default function Home() {
             </button>
           </div>
         </div>
-        {statusText && <p className="mt-3 text-sm text-center font-medium text-blue-700 bg-blue-50/50 p-2 rounded-lg">{statusText}</p>}
+        {/* Upload Status Text */}
+        {statusText && <p className="mt-3 text-sm text-center font-medium text-blue-700 bg-blue-50/50 p-2 rounded-lg animate-pulse">{statusText}</p>}
       </div>
 
       <div className="max-w-7xl mx-auto p-2 md:p-4">
