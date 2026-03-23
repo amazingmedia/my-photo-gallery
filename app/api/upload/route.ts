@@ -3,16 +3,14 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase ချိတ်ဆက်ရန်
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(request: Request) {
   try {
-    const { files } = await request.json(); // ဖိုင်နာမည်များ လက်ခံရယူခြင်း
+    const { files } = await request.json();
 
-    // ၁။ Supabase ကနေ Active ဖြစ်နေတဲ့ B2 Key ကို လှမ်းယူခြင်း
     const { data: accounts, error } = await supabase
       .from('storage_accounts')
       .select('*')
@@ -24,10 +22,8 @@ export async function POST(request: Request) {
     }
 
     const account = accounts[0];
-
-    // ၂။ Backblaze B2 (S3 Client) ကို ချိတ်ဆက်ခြင်း
     const s3 = new S3Client({
-      endpoint: account.endpoint_url, // ဥပမာ - https://s3.us-east-005.backblazeb2.com
+      endpoint: account.endpoint_url,
       region: 'us-east-005', 
       credentials: {
         accessKeyId: account.access_key,
@@ -35,19 +31,15 @@ export async function POST(request: Request) {
       },
     });
 
-    // ၃။ ဖိုင်တစ်ခုချင်းစီအတွက် Upload တင်မည့် လင့်ခ် (Pre-signed URL) များ ဖန်တီးခြင်း
     const uploadTickets = await Promise.all(
       files.map(async (file: { name: string, type: string }) => {
-        // ဖိုင်နာမည် မထပ်အောင် အချိန်ဂဏန်းလေးတွေ ထည့်ပေးခြင်း
         const uniqueFileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
-        
         const command = new PutObjectCommand({
-          Bucket: 'mmhdmovie', // သင့်ရဲ့ Bucket နာမည်
+          Bucket: 'mmhdmovie',
           Key: uniqueFileName,
-          ContentType: file.type, // image/jpeg သို့မဟုတ် video/mp4
+          ContentType: file.type,
         });
 
-        // တစ်နာရီ (၃၆၀၀ စက္ကန့်) သက်တမ်းရှိသော လင့်ခ်ထုတ်ပေးခြင်း
         const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
         
         return {
