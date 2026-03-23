@@ -1,14 +1,15 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+// အဆင့် ၂ က Icons Helper ကို Import လုပ်ခြင်း
+import { CloseIcon, DeleteIcon, ShareIcon, HeartIcon } from '@/components/GalleryIcons';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Type တွင် view_url ထပ်ပေါင်းထည့်ထားပါသည်
 type Photo = {
   id: string;
   photo_url: string;
@@ -25,6 +26,11 @@ export default function Home() {
   
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [isLoadingGallery, setIsLoadingGallery] = useState(true);
+  
+  // iOS Lightbox အတွက် State များ
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null); // ဘယ်ပုံကိုနှိပ်ထားလဲ မှတ်ထားရန်
+  const [isDeleting, setIsDeleting] = useState(false); // ဖျက်နေစဉ် loading ပြရန်
+  
   const router = useRouter();
 
   useEffect(() => {
@@ -39,14 +45,12 @@ export default function Home() {
     checkUser();
   }, [router]);
 
-  // Token ရပြီဆိုသည်နှင့် ပုံများကို စတင်ဆွဲထုတ်မည်
   useEffect(() => {
     if (sessionToken) {
       fetchPhotos();
     }
   }, [sessionToken]);
 
-  // အပြောင်းအလဲ - API အသစ်မှတဆင့် ပုံများကို ဆွဲထုတ်ခြင်း
   const fetchPhotos = async () => {
     if (!sessionToken) return;
     setIsLoadingGallery(true);
@@ -79,7 +83,7 @@ export default function Home() {
   const handleUpload = async () => {
     if (selectedFiles.length === 0 || !sessionToken) return;
     setIsUploading(true);
-    setStatusText('Upload Ticket များ တောင်းခံနေပါသည်...');
+    setStatusText('Uploading memory...');
 
     try {
       const fileInfo = selectedFiles.map(f => ({ name: f.name, type: f.type }));
@@ -93,11 +97,10 @@ export default function Home() {
         body: JSON.stringify({ files: fileInfo }),
       });
       
-      if (!response.ok) throw new Error('API ချိတ်ဆက်မှု ကျရှုံးပါသည်');
+      if (!response.ok) throw new Error('API Check failure');
       
       const { tickets } = await response.json();
 
-      setStatusText('Backblaze B2 သို့ တိုက်ရိုက် တင်နေပါသည်...');
       const uploadedData = [];
 
       for (let i = 0; i < selectedFiles.length; i++) {
@@ -110,96 +113,231 @@ export default function Home() {
         uploadedData.push({ photo_url: publicUrl, account_id: ticket.accountId, media_type: ticket.mediaType });
       }
 
-      setStatusText('Database ထဲသို့ သိမ်းဆည်းနေပါသည်...');
       const { error } = await supabase.from('photos').insert(uploadedData);
-
       if (error) throw error;
 
-      setStatusText('အောင်မြင်စွာ တင်ပြီးပါပြီ!');
       setSelectedFiles([]); 
       fetchPhotos(); 
       
     } catch (error) {
       console.error(error);
-      setStatusText('Upload တင်ရာတွင် အခက်အခဲဖြစ်ပေါ်ခဲ့ပါသည်။');
+      setStatusText('Upload Failed. Please try again.');
     } finally {
       setIsUploading(false);
       setTimeout(() => setStatusText(''), 3000); 
     }
   };
 
+  // ************ iOS Gallery Logic (Lightbox & Delete) ************
+
+  // ပုံအကြီးချဲ့ကြည့်သည့်အခါ Next/Prev အတွက် Helper Function
+  const navigatePhoto = useCallback((direction: 'next' | 'prev') => {
+    if (selectedPhotoIndex === null) return;
+    
+    let nextIndex = direction === 'next' ? selectedPhotoIndex + 1 : selectedPhotoIndex - 1;
+    
+    // ပထမဆုံးပုံရောက်ရင် Prev နှိပ်ရင် နောက်ဆုံးပုံသို့သွားမည်၊ နောက်ဆုံးပုံရောက်ရင် Next နှိပ်ရင် ပထမဆုံးပုံသို့သွားမည် (Loop)
+    if (nextIndex >= photos.length) nextIndex = 0;
+    if (nextIndex < 0) nextIndex = photos.length - 1;
+    
+    setSelectedPhotoIndex(nextIndex);
+  }, [selectedPhotoIndex, photos.length]);
+
+  // Keyboard ဖြင့် Navigation လုပ်နိုင်အောင်ရေးခြင်း
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedPhotoIndex === null) return;
+      if (e.key === 'ArrowRight') navigatePhoto('next');
+      if (e.key === 'ArrowLeft') navigatePhoto('prev');
+      if (e.key === 'Escape') setSelectedPhotoIndex(null); // Escape နှိပ်ရင် ပိတ်မည်
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedPhotoIndex, navigatePhoto]);
+
+  // ပုံဖျက်ခြင်း လုပ်ငန်းစဉ်
+  const handleDeletePhoto = async () => {
+    if (selectedPhotoIndex === null || !sessionToken || !confirm('ဒီပုံကို အပြီးဖျက်မှာ သေချာပါသလား?')) return;
+    
+    setIsDeleting(true);
+    const photoToDelete = photos[selectedPhotoIndex];
+    // Database URL ကနေ File Key ကို ဖြတ်ယူခြင်း
+    const fileKey = photoToDelete.photo_url.split('/').pop();
+
+    try {
+      const response = await fetch('/api/photos/delete', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}` 
+        },
+        body: JSON.stringify({ photoId: photoToDelete.id, fileKey: fileKey }),
+      });
+      
+      if (!response.ok) throw new Error('Delete API failed');
+
+      // UI မှ တစ်ခါတည်း ချက်ချင်းဖျက်လိုက်ခြင်း
+      const updatedPhotos = photos.filter(p => p.id !== photoToDelete.id);
+      setPhotos(updatedPhotos);
+      
+      // ပုံဖျက်ပြီးနောက် နောက်တစ်ပုံကို ပြရန် (သို့မဟုတ် နောက်ဆုံးပုံဆိုရင် Lightbox ပိတ်မည်)
+      if (updatedPhotos.length === 0) {
+        setSelectedPhotoIndex(null);
+      } else {
+        // Next index သို့Loop ပတ်ပေးခြင်း
+        navigatePhoto('next');
+      }
+
+    } catch (error) {
+      console.error(error);
+      alert('ပုံဖျက်ရာတွင် အခက်အခဲဖြစ်ပေါ်ခဲ့ပါသည်။');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Web Share API ဖြင့် ပုံကို Share ခြင်း (Phone မှာဆို iOS Share ပေါ်မည်)
+  const handleShare = async () => {
+    if (selectedPhotoIndex === null) return;
+    const photo = photos[selectedPhotoIndex];
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Check out this memory',
+          url: photo.view_url || photo.photo_url
+        });
+      } catch (error) {
+        console.log('Share error:', error);
+      }
+    } else {
+      // Browser က Share မရရင် Link ကို Copy ယူမည်
+      navigator.clipboard.writeText(photo.view_url || photo.photo_url);
+      alert('Link copied to clipboard!');
+    }
+  };
+
   if (!sessionToken) return null; 
 
   return (
-    <main className="min-h-screen p-6 md:p-10 bg-gray-50 text-gray-900">
-      <div className="max-w-6xl mx-auto">
-        
-        <div className="bg-white p-6 md:p-8 rounded-xl shadow-sm border border-gray-100 mb-8 relative">
-          <button onClick={handleLogout} className="absolute top-6 right-6 text-sm text-red-600 hover:text-red-800 font-medium">
-            Logout
-          </button>
-          
-          <h1 className="text-3xl font-bold mb-2">My Personal Gallery</h1>
-          <p className="text-gray-500 mb-6 text-sm">Upload and manage your memories securely.</p>
-          
-          <div className="max-w-xl">
+    <main className="min-h-screen p-0 m-0 bg-white text-gray-900 font-sans">
+      
+      {/* Dense iPhone Style Header */}
+      <div className="bg-white/95 backdrop-blur-sm sticky top-0 z-40 border-b border-gray-100 p-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <h1 className="text-2xl font-extrabold text-gray-950 tracking-tighter">My Photos</h1>
+          <div className="flex items-center gap-3">
             <input 
               type="file" multiple accept="image/*, video/*" onChange={handleFileChange}
-              className="block w-full text-sm text-gray-500 mb-4 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer transition-colors"
+              id="fileInput"
+              className="hidden"
             />
-
-            {selectedFiles.length > 0 && (
-              <div className="mb-2">
-                <p className="text-xs font-medium text-gray-500 mb-2">ရွေးချယ်ထားသော ဖိုင်များ ({selectedFiles.length})</p>
-                <button 
-                  onClick={handleUpload} disabled={isUploading}
-                  className={`w-full py-3 rounded-lg font-bold text-white transition-all ${isUploading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:shadow-md'}`}
-                >
-                  {isUploading ? 'Uploading...' : 'Upload တင်မည်'}
-                </button>
-              </div>
-            )}
-
-            {statusText && <p className="mt-3 text-sm font-medium text-blue-700 bg-blue-50/50 p-2 rounded-lg">{statusText}</p>}
+            <label htmlFor="fileInput" className="bg-blue-50 text-blue-700 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer hover:bg-blue-100 transition-colors">
+              {isUploading ? 'Uploading...' : 'Upload'}
+            </label>
+            <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-700 font-medium">
+              Logout
+            </button>
           </div>
         </div>
-
-        <div>
-          <h2 className="text-xl font-bold mb-6 flex items-center">
-            Gallery Photos 
-            <span className="ml-3 bg-gray-200 text-gray-700 py-0.5 px-2.5 rounded-full text-sm">{photos.length}</span>
-          </h2>
-          
-          {isLoadingGallery ? (
-            <div className="flex justify-center py-20">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-          ) : photos.length === 0 ? (
-            <div className="text-center py-20 bg-white rounded-xl border border-gray-100 border-dashed">
-              <p className="text-gray-500">ပုံများ မရှိသေးပါ။ အပေါ်မှ Upload တင်နိုင်ပါသည်။</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-              {photos.map((photo) => (
-                <div key={photo.id} className="group relative aspect-square bg-gray-100 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300">
-                  {photo.media_type?.includes('video') ? (
-                    <video src={photo.view_url || photo.photo_url} controls className="w-full h-full object-cover" />
-                  ) : (
-                    <img 
-                      src={photo.view_url || photo.photo_url} 
-                      alt="Gallery item" 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                    />
-                  )}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-300 pointer-events-none"></div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+        {statusText && <p className="mt-3 text-sm text-center font-medium text-blue-700 bg-blue-50/50 p-2 rounded-lg">{statusText}</p>}
       </div>
+
+      <div className="max-w-7xl mx-auto p-2 md:p-4">
+        
+        {isLoadingGallery ? (
+          <div className="flex justify-center py-20">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : photos.length === 0 ? (
+          <div className="text-center py-20 bg-gray-50 rounded-xl border border-gray-100 border-dashed">
+            <p className="text-gray-500">No photos yet. Start by uploading one.</p>
+          </div>
+        ) : (
+          /* dense iPhone Style Photo Grid */
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1 md:gap-2">
+            {photos.map((photo, index) => (
+              <div 
+                key={photo.id} 
+                className="group relative aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer"
+                onClick={() => setSelectedPhotoIndex(index)} // ပုံကိုနှိပ်ရင် index ကိုမှတ်မည်
+              >
+                {photo.media_type?.includes('video') ? (
+                  <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+                    <video src={photo.view_url || photo.photo_url} className="w-full h-full object-cover" />
+                    <div className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white text-xs">📹</div>
+                  </div>
+                ) : (
+                  <img 
+                    src={photo.view_url || photo.photo_url} 
+                    alt="Gallery item" 
+                    className="w-full h-full object-cover loading="lazy"
+                  />
+                )}
+                {/* Hover Effect */}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none"></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ************ iOS Style Lightbox (Full Screen View) Modal ************ */}
+      {selectedPhotoIndex !== null && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col transition-all duration-300">
+          
+          {/* Header - Close Button (iOS Style Done) */}
+          <div className="flex items-center justify-between p-4 bg-black/20 text-white">
+            <button onClick={() => setSelectedPhotoIndex(null)} className="flex items-center gap-1.5 text-blue-400 font-medium">
+              <CloseIcon className="w-5 h-5" /> Done
+            </button>
+            <p className="text-xs text-gray-400 font-mono">{selectedPhotoIndex + 1} / {photos.length}</p>
+          </div>
+
+          {/* Main Content - Large Image Area */}
+          <div className="flex-grow relative flex items-center justify-center p-2 group">
+            {/* Prev Button (desktop only) */}
+            <button onClick={() => navigatePhoto('prev')} className="absolute left-4 z-10 p-3 bg-black/40 rounded-full text-white/50 group-hover:text-white group-hover:bg-black/80 hidden md:block transition-all">
+              &larr;
+            </button>
+            
+            <div className="max-w-full max-h-[80vh] flex items-center justify-center">
+              {photos[selectedPhotoIndex].media_type?.includes('video') ? (
+                <video src={photos[selectedPhotoIndex].view_url} controls className="w-full max-h-[80vh] object-contain" autoPlay />
+              ) : (
+                <img 
+                  src={photos[selectedPhotoIndex].view_url} 
+                  alt="Full view" 
+                  className="max-w-full max-h-[80vh] object-contain transition-transform duration-300"
+                />
+              )}
+            </div>
+
+            {/* Next Button (desktop only) */}
+            <button onClick={() => navigatePhoto('next')} className="absolute right-4 z-10 p-3 bg-black/40 rounded-full text-white/50 group-hover:text-white group-hover:bg-black/80 hidden md:block transition-all">
+              &rarr;
+            </button>
+          </div>
+
+          {/* Footer - iOS Native Style Action Bar (Share, Heart, Trash) */}
+          <div className="bg-black/40 backdrop-blur-sm p-4 border-t border-gray-800 flex items-center justify-around text-blue-400">
+            <button onClick={handleShare} className="hover:text-blue-200" title="Share Photo">
+              <ShareIcon className="w-7 h-7" />
+            </button>
+            <button className="hover:text-blue-200" title="Favorite (Dummy)">
+              <HeartIcon className="w-7 h-7" />
+            </button>
+            <button 
+              onClick={handleDeletePhoto} 
+              disabled={isDeleting}
+              className={`hover:text-red-400 ${isDeleting ? 'text-gray-600 cursor-not-allowed' : 'text-blue-400'}`}
+              title="Delete Photo"
+            >
+              {isDeleting ? '...' : <DeleteIcon className="w-7 h-7" />}
+            </button>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
