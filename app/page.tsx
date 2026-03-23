@@ -73,24 +73,21 @@ export default function Home() {
     router.push('/login');
   };
 
-  // ဖိုင်ရွေးလိုက်သည်နှင့် တစ်ပြိုင်နက် Auto Upload လုပ်မည့် Function
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const filesToUpload = Array.from(e.target.files);
       await processUpload(filesToUpload);
     }
-    // ဖိုင်ရွေးပြီးသွားပါက Input ကို ပြန်ရှင်းထားမည် (နောက်တစ်ခါ ထပ်ရွေးနိုင်ရန်)
     e.target.value = '';
   };
 
-  // Upload တင်သည့် အဓိက လုပ်ငန်းစဉ်
   const processUpload = async (files: File[]) => {
     if (!sessionToken) return;
     setIsUploading(true);
     setStatusText('ပုံများ စတင် Upload တင်နေပါသည်...');
 
     try {
-      const fileInfo = files.map(f => ({ name: f.name, type: f.type }));
+      const fileInfo = files.map(f => ({ name: f.name, type: f.type || 'application/octet-stream' }));
       
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -110,25 +107,38 @@ export default function Home() {
         const file = files[i];
         const ticket = tickets[i];
 
-        await fetch(ticket.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+        // ပြင်ဆင်ချက် - Upload ကျရှုံးပါက ဆက်မလုပ်ဘဲ Error အတိအကျ ပြပေးမည့်စနစ်
+        const putResponse = await fetch(ticket.uploadUrl, { 
+          method: 'PUT', 
+          headers: { 'Content-Type': file.type || 'application/octet-stream' }, 
+          body: file 
+        });
+
+        if (!putResponse.ok) {
+          const errorText = await putResponse.text();
+          console.error("Backblaze Error Details:", errorText);
+          throw new Error(`Upload Failed: ${putResponse.status}. Backblaze rejected the file.`);
+        }
 
         const publicUrl = `https://mmhdmovie.s3.us-east-005.backblazeb2.com/${ticket.fileKey}`;
-        uploadedData.push({ photo_url: publicUrl, account_id: ticket.accountId, media_type: ticket.mediaType });
+        uploadedData.push({ photo_url: publicUrl, account_id: ticket.accountId, media_type: file.type || 'image/jpeg' });
       }
 
       setStatusText('Database ထဲသို့ မှတ်တမ်းတင်နေပါသည်...');
       const { error } = await supabase.from('photos').insert(uploadedData);
-      if (error) throw error;
+      if (error) throw new Error('Database Insert Failed');
 
       setStatusText('အောင်မြင်စွာ တင်ပြီးပါပြီ! 🎉');
-      fetchPhotos(); // ပုံသစ်တင်ပြီးပါက Gallery ကို ချက်ချင်း Refresh လုပ်မည်
+      fetchPhotos(); 
       
-    } catch (error) {
-      console.error(error);
-      setStatusText('Upload Failed. Please try again.');
+    } catch (error: any) {
+      console.error("Upload Catch Error:", error);
+      // ပြင်ဆင်ချက် - Error တက်ပါက အနီရောင်စာသားဖြင့် အတိအကျ ဖော်ပြပေးမည်
+      setStatusText(`❌ Error: ${error.message}`);
     } finally {
       setIsUploading(false);
-      setTimeout(() => setStatusText(''), 4000); 
+      // Error ဖြစ်ရင် စာသားကို ချက်ချင်းမဖျောက်ဘဲ အချိန်ပိုပေးထားမည်
+      setTimeout(() => setStatusText(''), 6000); 
     }
   };
 
@@ -159,7 +169,8 @@ export default function Home() {
     
     setIsDeleting(true);
     const photoToDelete = photos[selectedPhotoIndex];
-    const fileKey = photoToDelete.photo_url.split('/').pop();
+    // လင့်ခ်အဆုံးပိုင်းရှိ ဖိုင်နာမည်ကို အတိအကျ ဖြတ်ယူခြင်း
+    const fileKey = photoToDelete.photo_url.split('/').pop()?.split('?')[0];
 
     try {
       const response = await fetch('/api/photos/delete', {
@@ -217,7 +228,6 @@ export default function Home() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-2xl font-extrabold text-gray-950 tracking-tighter">My Photos</h1>
           <div className="flex items-center gap-3">
-            {/* Auto-upload input */}
             <input 
               type="file" multiple accept="image/*, video/*" onChange={handleFileChange}
               id="fileInput"
@@ -232,8 +242,12 @@ export default function Home() {
             </button>
           </div>
         </div>
-        {/* Upload Status Text */}
-        {statusText && <p className="mt-3 text-sm text-center font-medium text-blue-700 bg-blue-50/50 p-2 rounded-lg animate-pulse">{statusText}</p>}
+        {/* Error ပေါ်လာပါက အနီရောင်ဖြင့် ပြသရန် ပြင်ဆင်ထားသည် */}
+        {statusText && (
+          <p className={`mt-3 text-sm text-center font-medium p-2 rounded-lg animate-pulse ${statusText.includes('Error') ? 'text-red-700 bg-red-50' : 'text-blue-700 bg-blue-50/50'}`}>
+            {statusText}
+          </p>
+        )}
       </div>
 
       <div className="max-w-7xl mx-auto p-2 md:p-4">
