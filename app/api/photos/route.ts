@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ၁။ Token စစ်ဆေးခြင်း (Login ဝင်ထားသူသာ ကြည့်ခွင့်ရှိမည်)
     const authHeader = request.headers.get('Authorization');
     if (!authHeader) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Invalid Token' }, { status: 401 });
 
+    // ၂။ Photos များကို Database မှ ဆွဲထုတ်ခြင်း
     const { data: photos, error: photosError } = await supabase
       .from('photos')
       .select('*')
@@ -26,6 +28,7 @@ export async function GET(request: Request) {
     if (photosError) throw photosError;
     if (!photos || photos.length === 0) return NextResponse.json({ photos: [] });
 
+    // ၃။ Backblaze Key များကို ဆွဲထုတ်ခြင်း
     const { data: accounts } = await supabase.from('storage_accounts').select('*').eq('status', 'Active').limit(1);
     if (!accounts || accounts.length === 0) throw new Error('Active Account မရှိပါ');
     const account = accounts[0];
@@ -39,29 +42,24 @@ export async function GET(request: Request) {
       },
     });
 
+    // ၄။ ပုံတစ်ပုံချင်းစီအတွက် Pre-signed URL (ကြည့်ခွင့်လက်မှတ်) များ ဖန်တီးခြင်း
     const photosWithSignedUrls = await Promise.all(
       photos.map(async (photo) => {
-        try {
-            // URL မှ File Key ကို အတိအကျ ဖြတ်ယူပြီး Decode လုပ်ခြင်း
-            const rawKey = photo.photo_url.split('/').pop()?.split('?')[0] || '';
-            const fileKey = decodeURIComponent(rawKey);
+        // Database ထဲက URL ကနေ ဖိုင်နာမည်ကို ပြန်ဖြတ်ယူခြင်း
+        const fileKey = photo.photo_url.split('/').pop();
 
-            const command = new GetObjectCommand({
-              Bucket: 'mmhdmovie', // သင့် Bucket နာမည်
-              Key: fileKey,
-            });
+        const command = new GetObjectCommand({
+          Bucket: 'mmhdmovie', // သင့် Bucket နာမည်
+          Key: fileKey,
+        });
 
-            // ၁ နာရီခံမည့် ကြည့်ခွင့်လက်မှတ် ထုတ်ပေးခြင်း
-            const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-            
-            return {
-              ...photo,
-              view_url: signedUrl 
-            };
-        } catch (err) {
-            console.error("Presigned URL Error for photo ID:", photo.id, err);
-            return photo; 
-        }
+        // ၁ နာရီ သာ သက်တမ်းရှိမည့် Link အသစ် ဖန်တီးခြင်း (၁ နာရီကျော်ရင် ကြည့်မရတော့ပါ)
+        const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+        return {
+          ...photo,
+          view_url: signedUrl // Frontend တွင် ပြသရန် URL အသစ်
+        };
       })
     );
 
@@ -69,6 +67,6 @@ export async function GET(request: Request) {
 
   } catch (error: any) {
     console.error('Photos Fetch Error:', error);
-    return NextResponse.json({ error: 'Server Error', details: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Server Error' }, { status: 500 });
   }
 }
