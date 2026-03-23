@@ -4,11 +4,25 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(request: Request) {
   try {
+    // ၁။ Login ဝင်ထားခြင်း ရှိမရှိ Token အရင်စစ်ဆေးပါမည် (လုံခြုံရေး အဆင့်)
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: 'အကောင့်ဝင်ထားရန် လိုအပ်ပါသည်' }, { status: 401 });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Token မှားယွင်းနေပါသည်' }, { status: 401 });
+    }
+
+    // ၂။ Token မှန်ကန်မှသာ အောက်ပါ လုပ်ငန်းစဉ်များကို ဆက်လုပ်ခွင့်ပေးပါမည်
     const { files } = await request.json();
 
     const { data: accounts, error } = await supabase
@@ -35,7 +49,7 @@ export async function POST(request: Request) {
       files.map(async (file: { name: string, type: string }) => {
         const uniqueFileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
         const command = new PutObjectCommand({
-          Bucket: 'mmhdmovie',
+          Bucket: 'mmhdmovie', // သင့်ရဲ့ Bucket နာမည်
           Key: uniqueFileName,
           ContentType: file.type,
         });
